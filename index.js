@@ -369,7 +369,7 @@ app.patch("/bookings/:id/status", verifyToken, async (req, res) => {
 app.use((req, res) => res.status(404).send({ message: "Route not found" }));
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).send({ message: "Something went wrong on the server" });
+  res.status(500).send({ message: "Something went wrong on the server", detail: err.message });
 });
 
 if (require.main === module) {
