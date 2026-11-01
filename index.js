@@ -29,6 +29,7 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 const db = client.db("studiospace");
 const studiosCollection = db.collection("studios");
 const bookingsCollection = db.collection("bookings");
+const reviewsCollection = db.collection("reviews");
 
 client
   .connect()
@@ -198,6 +199,54 @@ app.delete("/studios/:id", verifyToken, async (req, res) => {
   }
   const result = await studiosCollection.deleteOne({ _id });
   res.send(result);
+});
+
+// ---------- reviews ----------
+app.get("/studios/:id/reviews", async (req, res) => {
+  const _id = toId(req.params.id);
+  if (!_id) return res.status(400).send({ message: "Invalid studio id" });
+  const result = await reviewsCollection
+    .find({ studioId: String(_id) })
+    .sort({ createdAt: -1 })
+    .toArray();
+  res.send(result);
+});
+
+app.post("/studios/:id/reviews", verifyToken, async (req, res) => {
+  const _id = toId(req.params.id);
+  if (!_id) return res.status(400).send({ message: "Invalid studio id" });
+  const rating = Number(req.body?.rating);
+  const comment = String(req.body?.comment || "").trim();
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).send({ message: "Please choose a rating from 1 to 5" });
+  }
+  if (comment.length < 3 || comment.length > 500) {
+    return res.status(400).send({ message: "Review must be 3 to 500 characters" });
+  }
+  const studio = await studiosCollection.findOne({ _id });
+  if (!studio) return res.status(404).send({ message: "Studio not found" });
+  if (studio.ownerEmail === req.user.email) {
+    return res.status(400).send({ message: "You cannot review your own studio" });
+  }
+  const studioId = String(_id);
+  const already = await reviewsCollection.findOne({ studioId, userEmail: req.user.email });
+  if (already) return res.status(409).send({ message: "You have already reviewed this studio" });
+
+  const review = {
+    studioId,
+    userEmail: req.user.email,
+    userName: req.user.name,
+    rating,
+    comment,
+    createdAt: new Date(),
+  };
+  const result = await reviewsCollection.insertOne(review);
+
+  // keep the studio's average rating up to date
+  const all = await reviewsCollection.find({ studioId }).toArray();
+  const average = Math.round((all.reduce((sum, r) => sum + r.rating, 0) / all.length) * 10) / 10;
+  await studiosCollection.updateOne({ _id }, { $set: { rating: average, reviewCount: all.length } });
+  res.status(201).send({ ...result, rating: average, reviewCount: all.length });
 });
 
 // ---------- bookings ----------
